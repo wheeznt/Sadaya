@@ -2,31 +2,65 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
-use Database\Factories\UserFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
-    /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable;
 
-    /**
-     * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
-     */
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+        'phone',
+        'role',
+        'status_akun',
+        'status_verifikasi',
+        'alamat',
+        'latitude',
+        'longitude',
+        'catatan_alamat',
+        'nama_toko',
+        'alamat_toko',
+        'nomor_rekening',
+        'nama_bank',
+    ];
+
+    protected $hidden = [
+        'password',
+        'remember_token',
+    ];
+
     protected function casts(): array
     {
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'latitude' => 'float',
+            'longitude' => 'float',
         ];
+    }
+
+    public function products()
+    {
+        return $this->hasMany(Product::class, 'penjual_id');
+    }
+
+    public function buyerOrders()
+    {
+        return $this->hasMany(Order::class, 'pembeli_id');
+    }
+
+    public function sellerOrders()
+    {
+        return $this->hasMany(Order::class, 'penjual_id');
+    }
+
+    public function payouts()
+    {
+        return $this->hasMany(PayoutRecord::class, 'penjual_id');
     }
 }
