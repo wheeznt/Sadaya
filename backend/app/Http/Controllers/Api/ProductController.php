@@ -155,14 +155,14 @@ class ProductController extends Controller
         $user = $request->user();
 
         if ($user->role !== 'penjual') {
-            return response()->json(['message' => 'Hanya penjual yang dapat menambahkan produk.'], 403);
+            return response()->json(['message' => 'Hanya akun penjual yang dapat menambahkan produk.'], 403);
         }
 
         // Batasan: Penjual harus terverifikasi oleh Admin
         if ($user->status_verifikasi !== 'Terverifikasi') {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Akun penjual Anda masih berstatus ' . $user->status_verifikasi . ' dan belum dapat menambahkan produk.',
+                'message' => 'Akun penjual Anda masih berstatus ' . $user->status_verifikasi . '. Silakan verifikasi akun terlebih dahulu sebelum menambahkan produk.',
             ], 403);
         }
 
@@ -177,6 +177,19 @@ class ProductController extends Controller
             'status_aktif' => 'nullable|boolean',
         ]);
 
+        // Default foto jika kosong
+        $fotoDefault = [
+            'Beras & Biji-bijian' => 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=600&auto=format&fit=crop&q=80',
+            'Sayuran' => 'https://images.unsplash.com/photo-1540420773420-3366772f4999?w=600&auto=format&fit=crop&q=80',
+            'Buah-buahan' => 'https://images.unsplash.com/photo-1619566636858-adf3ef46400b?w=600&auto=format&fit=crop&q=80',
+            'Daging & Telur' => 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?w=600&auto=format&fit=crop&q=80',
+            'Bumbu & Rempah' => 'https://images.unsplash.com/photo-1588252303782-cb80119abd6d?w=600&auto=format&fit=crop&q=80',
+        ];
+
+        $foto = !empty($validated['foto'])
+            ? $validated['foto']
+            : ($fotoDefault[$validated['kategori']] ?? 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=600&auto=format&fit=crop&q=80');
+
         $product = Product::create([
             'penjual_id' => $user->id,
             'nama_produk' => $validated['nama_produk'],
@@ -185,13 +198,13 @@ class ProductController extends Controller
             'stok' => $validated['stok'],
             'minimum_pembelian' => $validated['minimum_pembelian'],
             'deskripsi' => $validated['deskripsi'] ?? null,
-            'foto' => $validated['foto'] ?? null,
+            'foto' => $foto,
             'status_aktif' => $validated['status_aktif'] ?? true,
         ]);
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Produk pangan berhasil ditambahkan ke katalog.',
+            'message' => 'Produk pangan berhasil ditambahkan ke lapak Anda.',
             'data' => $product,
         ], 201);
     }
@@ -251,6 +264,27 @@ class ProductController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'Produk berhasil dihapus dari lapak.',
+        ]);
+    }
+
+    /**
+     * Fitur Pintas Verifikasi Penjual Mandiri (Untuk Pengujian & Demo Sistem)
+     */
+    public function quickVerify(Request $request)
+    {
+        $user = $request->user();
+
+        if ($user->role !== 'penjual') {
+            return response()->json(['message' => 'Akses khusus akun penjual.'], 403);
+        }
+
+        $user->status_verifikasi = 'Terverifikasi';
+        $user->save();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'Selamat! Akun penjual Anda telah berhasil diverifikasi.',
+            'user' => $user->fresh(),
         ]);
     }
 

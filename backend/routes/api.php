@@ -34,6 +34,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/seller/products', [ProductController::class, 'store']);
     Route::put('/seller/products/{id}', [ProductController::class, 'update']);
     Route::delete('/seller/products/{id}', [ProductController::class, 'destroy']);
+    Route::post('/seller/quick-verify', [ProductController::class, 'quickVerify']);
 
     // Penjual: Order Processing & Shipping
     Route::get('/seller/orders', [OrderController::class, 'sellerOrders']);

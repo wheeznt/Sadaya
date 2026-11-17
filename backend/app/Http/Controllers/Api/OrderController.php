@@ -222,22 +222,30 @@ class OrderController extends Controller
     }
 
     /**
-     * Penjual: Proses Pesanan ('Dibayar' -> 'Diproses')
+     * Penjual: Proses Pesanan ('Dibayar' / 'Menunggu Pembayaran' -> 'Diproses')
      */
     public function processOrder(Request $request, $id)
     {
         $user = $request->user();
-        $order = Order::where('penjual_id', $user->id)->find($id);
+        $order = Order::with('payment')->where('penjual_id', $user->id)->find($id);
 
         if (!$order) {
             return response()->json(['message' => 'Pesanan tidak ditemukan.'], 404);
         }
 
-        if ($order->status_pesanan !== 'Dibayar') {
+        if (!in_array($order->status_pesanan, ['Dibayar', 'Menunggu Pembayaran'])) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Hanya pesanan yang sudah dibayar yang dapat diproses.',
+                'message' => 'Pesanan dengan status "' . $order->status_pesanan . '" tidak dapat diproses lagi.',
             ], 400);
+        }
+
+        // Jika masih berstatus Menunggu Pembayaran, konfirmasi pembayaran otomatis (Escrow Hold)
+        if ($order->status_pesanan === 'Menunggu Pembayaran' && $order->payment) {
+            $order->payment->status_pembayaran = 'Berhasil';
+            $order->payment->status_dana = 'Ditahan';
+            $order->payment->tanggal_pembayaran = now();
+            $order->payment->save();
         }
 
         $order->status_pesanan = 'Diproses';
@@ -245,8 +253,8 @@ class OrderController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Pesanan berhasil diubah menjadi Diproses (penyiapan bahan pangan).',
-            'data' => $order->fresh(),
+            'message' => 'Pesanan berhasil diproses! Penjual kini sedang menyiapkan dan mengemas bahan pangan.',
+            'data' => $order->fresh(['product', 'buyer', 'payment']),
         ]);
     }
 
@@ -285,7 +293,7 @@ class OrderController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Pesanan telah dikirimkan kepada pembeli.',
+            'message' => 'Pesanan telah berhasil dikirimkan kepada pembeli.',
             'data' => $order->fresh(),
         ]);
     }

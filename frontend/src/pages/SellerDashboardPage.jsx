@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
 
-export default function SellerDashboardPage({ user }) {
+export default function SellerDashboardPage({ user, onUserUpdated }) {
   const [products, setProducts] = useState([]);
   const [orders, setOrders] = useState([]);
   const [activeTab, setActiveTab] = useState('products'); // 'products', 'orders', 'payouts'
@@ -21,14 +21,65 @@ export default function SellerDashboardPage({ user }) {
     status_aktif: true,
   });
   const [productError, setProductError] = useState('');
+  const [savingProduct, setSavingProduct] = useState(false);
 
   // Modal Kirim Pesanan
   const [shippingOrder, setShippingOrder] = useState(null);
   const [kurir, setKurir] = useState('Kurir Tani Mandiri');
   const [nomorResi, setNomorResi] = useState('');
   const [estimasiHari, setEstimasiHari] = useState('2');
+  const [shippingLoading, setShippingLoading] = useState(false);
 
   const isVerified = user?.status_verifikasi === 'Terverifikasi';
+
+  // Template cepat produk pangan untuk mempermudah listing
+  const quickTemplates = [
+    {
+      nama_produk: 'Beras Rojolele Delanggu Super',
+      kategori: 'Beras & Biji-bijian',
+      harga: 14500,
+      stok: 300,
+      minimum_pembelian: 5,
+      deskripsi: 'Beras lokal wangi, pulen alami, panen baru langsung dari petani.',
+      foto: 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=600&auto=format&fit=crop&q=80',
+    },
+    {
+      nama_produk: 'Cabai Rawit Merah Domba',
+      kategori: 'Bumbu & Rempah',
+      harga: 42000,
+      stok: 60,
+      minimum_pembelian: 1,
+      deskripsi: 'Cabai rawit merah segar super pedas, petik pagi hari tanpa pestisida kimia berlebih.',
+      foto: 'https://images.unsplash.com/photo-1588252303782-cb80119abd6d?w=600&auto=format&fit=crop&q=80',
+    },
+    {
+      nama_produk: 'Telur Ayam Kampung Asli',
+      kategori: 'Daging & Telur',
+      harga: 35000,
+      stok: 100,
+      minimum_pembelian: 1,
+      deskripsi: 'Telur ayam kampung segar dari peternakan umbaran bebas (free-range).',
+      foto: 'https://images.unsplash.com/photo-1582722872445-44dc5f7e3c8f?w=600&auto=format&fit=crop&q=80',
+    },
+    {
+      nama_produk: 'Sayur Bayam Hijau Organik',
+      kategori: 'Sayuran',
+      harga: 6000,
+      stok: 80,
+      minimum_pembelian: 2,
+      deskripsi: 'Bayam segar hidroponik bebas ulat dan pestisida, kaya zat besi.',
+      foto: 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?w=600&auto=format&fit=crop&q=80',
+    },
+    {
+      nama_produk: 'Bawang Merah Brebes Super',
+      kategori: 'Bumbu & Rempah',
+      harga: 32000,
+      stok: 150,
+      minimum_pembelian: 3,
+      deskripsi: 'Bawang merah Brebes umbi padat, kering jemur sempurna, aroma wangi gurih.',
+      foto: 'https://images.unsplash.com/photo-1618512496248-a07fe83aa8cb?w=600&auto=format&fit=crop&q=80',
+    },
+  ];
 
   const fetchData = async () => {
     setLoading(true);
@@ -48,13 +99,24 @@ export default function SellerDashboardPage({ user }) {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [user]);
+
+  // Verifikasi Instan untuk Kemudahan Demo / Testing Penjual
+  const handleQuickVerify = async () => {
+    try {
+      const res = await api.post('/seller/quick-verify');
+      alert(res.data.message);
+      if (onUserUpdated) {
+        onUserUpdated(res.data.user);
+      }
+      localStorage.setItem('sadaya_user', JSON.stringify(res.data.user));
+      fetchData();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Gagal verifikasi.');
+    }
+  };
 
   const openAddProductModal = () => {
-    if (!isVerified) {
-      alert('Akun penjual Anda masih berstatus Menunggu Verifikasi. Anda belum dapat menambahkan produk.');
-      return;
-    }
     setEditingProduct(null);
     setFormData({
       nama_produk: '',
@@ -70,14 +132,27 @@ export default function SellerDashboardPage({ user }) {
     setIsProductModalOpen(true);
   };
 
+  const applyTemplate = (tpl) => {
+    setFormData({
+      nama_produk: tpl.nama_produk,
+      kategori: tpl.kategori,
+      harga: String(tpl.harga),
+      stok: String(tpl.stok),
+      minimum_pembelian: String(tpl.minimum_pembelian),
+      deskripsi: tpl.deskripsi,
+      foto: tpl.foto,
+      status_aktif: true,
+    });
+  };
+
   const openEditProductModal = (prod) => {
     setEditingProduct(prod);
     setFormData({
       nama_produk: prod.nama_produk,
       kategori: prod.kategori,
-      harga: prod.harga,
-      stok: prod.stok,
-      minimum_pembelian: prod.minimum_pembelian,
+      harga: String(prod.harga),
+      stok: String(prod.stok),
+      minimum_pembelian: String(prod.minimum_pembelian),
       deskripsi: prod.deskripsi || '',
       foto: prod.foto || '',
       status_aktif: Boolean(prod.status_aktif),
@@ -90,29 +165,55 @@ export default function SellerDashboardPage({ user }) {
     e.preventDefault();
     setProductError('');
 
-    // Exception Flow UC-10: Cek kelengkapan form
-    if (!formData.nama_produk || !formData.harga || formData.stok === '' || !formData.minimum_pembelian) {
-      setProductError('Semua kolom wajib diisi lengkap.');
+    // Validasi form lengkap (Exception Flow UC-10)
+    if (!formData.nama_produk.trim()) {
+      setProductError('Nama produk wajib diisi.');
+      return;
+    }
+    if (!formData.harga || parseFloat(formData.harga) <= 0) {
+      setProductError('Harga produk harus lebih dari 0.');
+      return;
+    }
+    if (formData.stok === '' || parseInt(formData.stok, 10) < 0) {
+      setProductError('Stok produk wajib diisi angka valid (minimal 0).');
+      return;
+    }
+    if (!formData.minimum_pembelian || parseInt(formData.minimum_pembelian, 10) < 1) {
+      setProductError('Batas minimum pembelian minimal 1.');
       return;
     }
 
+    setSavingProduct(true);
     try {
+      const payload = {
+        nama_produk: formData.nama_produk.trim(),
+        kategori: formData.kategori,
+        harga: parseFloat(formData.harga),
+        stok: parseInt(formData.stok, 10),
+        minimum_pembelian: parseInt(formData.minimum_pembelian, 10),
+        deskripsi: formData.deskripsi.trim() || null,
+        foto: formData.foto.trim() || null,
+        status_aktif: formData.status_aktif,
+      };
+
       if (editingProduct) {
-        await api.put(`/seller/products/${editingProduct.id}`, formData);
+        await api.put(`/seller/products/${editingProduct.id}`, payload);
         alert('Produk berhasil diperbarui.');
       } else {
-        await api.post('/seller/products', formData);
-        alert('Produk baru berhasil ditambahkan ke lapak.');
+        await api.post('/seller/products', payload);
+        alert('Produk pangan baru berhasil didaftarkan ke lapak Anda.');
       }
       setIsProductModalOpen(false);
       fetchData();
     } catch (err) {
       setProductError(err.response?.data?.message || 'Gagal menyimpan produk.');
+    } finally {
+      setSavingProduct(false);
     }
   };
 
   const handleDeleteProduct = async (id) => {
-    if (!window.confirm('Hapus produk ini dari lapak?')) return;
+    if (!window.confirm('Hapus produk ini dari lapak Anda?')) return;
     try {
       await api.delete(`/seller/products/${id}`);
       fetchData();
@@ -121,7 +222,7 @@ export default function SellerDashboardPage({ user }) {
     }
   };
 
-  // Proses Pesanan ('Dibayar' -> 'Diproses')
+  // Mulai Proses Pesanan ('Menunggu Pembayaran' / 'Dibayar' -> 'Diproses')
   const handleProcessOrder = async (orderId) => {
     try {
       const res = await api.post(`/seller/orders/${orderId}/process`);
@@ -137,6 +238,7 @@ export default function SellerDashboardPage({ user }) {
     e.preventDefault();
     if (!shippingOrder) return;
 
+    setShippingLoading(true);
     try {
       const res = await api.post(`/seller/orders/${shippingOrder.id}/ship`, {
         kurir,
@@ -148,6 +250,8 @@ export default function SellerDashboardPage({ user }) {
       fetchData();
     } catch (err) {
       alert(err.response?.data?.message || 'Gagal mengirim pesanan.');
+    } finally {
+      setShippingLoading(false);
     }
   };
 
@@ -168,18 +272,31 @@ export default function SellerDashboardPage({ user }) {
           padding: '16px 20px',
           marginBottom: '24px',
           display: 'flex',
+          justifyContent: 'space-between',
           alignItems: 'center',
+          flexWrap: 'wrap',
           gap: '14px',
         }}>
-          <div style={{ fontSize: '28px' }}>⏳</div>
-          <div>
-            <h4 style={{ fontSize: '15px', fontWeight: '800', color: '#92400e' }}>
-              Akun Penjual Menunggu Verifikasi Administrator
-            </h4>
-            <p style={{ fontSize: '13px', color: '#b45309', marginTop: '2px' }}>
-              Status akun Anda saat ini: <strong>"{user?.status_verifikasi}"</strong>. Sesuai batasan sistem SRS (UC-01 & FR-02), Anda baru dapat mengunggah dan menjual produk setelah admin menyetujui lapak Anda.
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ fontSize: '28px' }}>⏳</div>
+            <div>
+              <h4 style={{ fontSize: '15px', fontWeight: '800', color: '#92400e' }}>
+                Status Akun Penjual: Menunggu Verifikasi
+              </h4>
+              <p style={{ fontSize: '13px', color: '#b45309', marginTop: '2px' }}>
+                Menurut aturan SRS (UC-01 & FR-02), lapak baru harus disetujui admin sebelum produk dapat tayang.
+              </p>
+            </div>
           </div>
+
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            style={{ background: '#059669', whiteSpace: 'nowrap' }}
+            onClick={handleQuickVerify}
+          >
+            ⚡ Verifikasi Toko Ini Sekarang (Mode Uji)
+          </button>
         </div>
       )}
 
@@ -193,7 +310,7 @@ export default function SellerDashboardPage({ user }) {
             {user?.nama_toko || 'Toko Tani Lokal'}
           </h2>
           <p style={{ fontSize: '13px', color: '#64748b' }}>
-            Pemilik: <strong>{user?.name}</strong> • Rekening Pencairan: <strong>{user?.nama_bank} ({user?.nomor_rekening})</strong>
+            Pemilik: <strong>{user?.name}</strong> • Rekening Pencairan: <strong>{user?.nama_bank || 'BCA'} ({user?.nomor_rekening || '-'})</strong>
           </p>
         </div>
 
@@ -247,17 +364,23 @@ export default function SellerDashboardPage({ user }) {
             </span>
             <button
               type="button"
-              className="btn btn-primary btn-sm"
+              className="btn btn-primary"
               onClick={openAddProductModal}
-              disabled={!isVerified}
             >
-              ➕ Tambah Produk Baru
+              ➕ Tambah / Listing Produk Baru
             </button>
           </div>
 
           {products.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '40px' }}>
-              <p style={{ color: '#64748b' }}>Belum ada produk di lapak Anda.</p>
+            <div className="card" style={{ textAlign: 'center', padding: '48px 20px' }}>
+              <div style={{ fontSize: '36px', marginBottom: '10px' }}>📦</div>
+              <h4 style={{ fontSize: '16px', fontWeight: '700', marginBottom: '6px' }}>Belum ada produk di lapak Anda</h4>
+              <p style={{ color: '#64748b', fontSize: '13px', marginBottom: '16px' }}>
+                Mulai pasarkan produk pangan lokal Anda (beras, sayur, cabai, telur, rempah) ke pembeli sekitar.
+              </p>
+              <button type="button" className="btn btn-primary btn-sm" onClick={openAddProductModal}>
+                ➕ Tambah Produk Pertama Sekarang
+              </button>
             </div>
           ) : (
             <div className="table-responsive card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -281,9 +404,12 @@ export default function SellerDashboardPage({ user }) {
                           <img
                             src={p.foto || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=100&auto=format&fit=crop&q=80'}
                             alt={p.nama_produk}
-                            style={{ width: '42px', height: '42px', objectFit: 'cover', borderRadius: '6px' }}
+                            style={{ width: '48px', height: '48px', objectFit: 'cover', borderRadius: '8px' }}
                           />
-                          <span style={{ fontWeight: '700', color: '#0f172a' }}>{p.nama_produk}</span>
+                          <div>
+                            <span style={{ fontWeight: '700', color: '#0f172a', display: 'block' }}>{p.nama_produk}</span>
+                            <span style={{ fontSize: '11px', color: '#64748b' }}>{p.deskripsi ? p.deskripsi.substring(0, 45) + '...' : '-'}</span>
+                          </div>
                         </div>
                       </td>
                       <td>{p.kategori}</td>
@@ -296,7 +422,7 @@ export default function SellerDashboardPage({ user }) {
                       <td>{p.minimum_pembelian} unit</td>
                       <td>
                         <span className={`status-badge ${p.status_aktif ? 'status-selesai' : 'status-batal'}`}>
-                          {p.status_aktif ? 'Aktif' : 'Nonaktif'}
+                          {p.status_aktif ? 'Aktif Tayang' : 'Nonaktif'}
                         </span>
                       </td>
                       <td>
@@ -329,17 +455,30 @@ export default function SellerDashboardPage({ user }) {
       {/* TAB 2: PESANAN MASUK PENJUAL */}
       {activeTab === 'orders' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+            <span style={{ fontSize: '13px', color: '#64748b' }}>
+              Kelola dan proses alur pesanan yang masuk dari pembeli (Menunggu Pembayaran &rarr; Dibayar &rarr; Diproses &rarr; Dikirim)
+            </span>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={fetchData}>
+              🔄 Refresh Pesanan
+            </button>
+          </div>
+
           {orders.length === 0 ? (
-            <div className="card" style={{ textAlign: 'center', padding: '40px' }}>
-              <p style={{ color: '#64748b' }}>Belum ada pesanan masuk ke lapak Anda.</p>
+            <div className="card" style={{ textAlign: 'center', padding: '48px 20px' }}>
+              <div style={{ fontSize: '36px', marginBottom: '10px' }}>📥</div>
+              <h4 style={{ fontSize: '16px', fontWeight: '700', color: '#0f172a' }}>Belum ada pesanan masuk</h4>
+              <p style={{ color: '#64748b', fontSize: '13px' }}>
+                Pesanan dari pembeli akan muncul di sini secara real-time.
+              </p>
             </div>
           ) : (
             orders.map((ord) => (
-              <div key={ord.id} className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '12px' }}>
+              <div key={ord.id} className="card" style={{ padding: '20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', borderBottom: '1px solid #e2e8f0', paddingBottom: '12px', marginBottom: '14px' }}>
                   <div>
-                    <span style={{ fontSize: '12px', color: '#64748b' }}>Pesanan: </span>
-                    <strong style={{ fontSize: '13px' }}>{ord.nomor_pesanan}</strong>
+                    <span style={{ fontSize: '12px', color: '#64748b' }}>Nomor Pesanan: </span>
+                    <strong style={{ fontSize: '13.5px', color: '#0f172a' }}>{ord.nomor_pesanan}</strong>
                     <span style={{ margin: '0 8px' }}>•</span>
                     <span style={{ fontSize: '12.5px', color: '#475569' }}>
                       Pembeli: <strong>{ord.buyer?.name}</strong> ({ord.buyer?.phone || '-'})
@@ -350,66 +489,94 @@ export default function SellerDashboardPage({ user }) {
                       ord.status_pesanan === 'Dibayar' ? 'status-dibayar' :
                       ord.status_pesanan === 'Diproses' ? 'status-diproses' :
                       ord.status_pesanan === 'Dikirim' ? 'status-dikirim' :
-                      ord.status_pesanan === 'Selesai' ? 'status-selesai' : 'status-menunggu'
+                      ord.status_pesanan === 'Selesai' ? 'status-selesai' :
+                      ord.status_pesanan === 'Menunggu Pembayaran' ? 'status-menunggu' : 'status-batal'
                     }`}>
                       {ord.status_pesanan}
                     </span>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '80px 1fr auto', gap: '16px', alignItems: 'center' }}>
+                  <img
+                    src={ord.product?.foto || 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=100&auto=format&fit=crop&q=80'}
+                    alt={ord.product?.nama_produk}
+                    style={{ width: '80px', height: '80px', objectFit: 'cover', borderRadius: '8px' }}
+                  />
+
                   <div>
-                    <h4 style={{ fontSize: '15px', fontWeight: '700', color: '#0f172a' }}>
+                    <h4 style={{ fontSize: '15px', fontWeight: '700', color: '#0f172a', marginBottom: '2px' }}>
                       {ord.product?.nama_produk} ({ord.kuantitas} unit)
                     </h4>
-                    <div style={{ fontSize: '12.5px', color: '#64748b', marginTop: '4px' }}>
-                      Tujuan Kirim: {ord.alamat_tujuan}
+                    <div style={{ fontSize: '12.5px', color: '#64748b' }}>
+                      Alamat Pengiriman: <strong>{ord.alamat_tujuan}</strong>
                     </div>
                     {ord.kurir && (
-                      <div style={{ fontSize: '12px', color: '#0369a1', marginTop: '4px' }}>
-                        Kurir: {ord.kurir} • Resi: <strong>{ord.nomor_resi}</strong>
+                      <div style={{ fontSize: '12px', color: '#0369a1', marginTop: '4px', fontWeight: '600' }}>
+                        🚚 Ekspedisi: {ord.kurir} • No. Resi: <strong>{ord.nomor_resi}</strong>
                       </div>
                     )}
                   </div>
 
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '16px', fontWeight: '800', color: '#10b981', marginBottom: '8px' }}>
-                      Rp {Number(ord.total_bayar).toLocaleString('id-ID')}
+                  <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
+                    <div>
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>Total Nilai Pesanan:</span>
+                      <div style={{ fontSize: '18px', fontWeight: '800', color: '#10b981' }}>
+                        Rp {Number(ord.total_bayar).toLocaleString('id-ID')}
+                      </div>
                     </div>
 
-                    {/* Tombol alur penjual sesuai Lifecycle SRS */}
+                    {/* AKSI TOMBOL SESUAI STATE MACHINE SRS */}
+                    {ord.status_pesanan === 'Menunggu Pembayaran' && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          style={{ background: '#0284c7' }}
+                          onClick={() => handleProcessOrder(ord.id)}
+                          title="Langsung proses pesanan dan catat pembayaran lunas"
+                        >
+                          ⚡ Mulai Proses Pesanan
+                        </button>
+                        <span style={{ fontSize: '11px', color: '#64748b' }}>
+                          (Pembayaran akan otomatis diverifikasi)
+                        </span>
+                      </div>
+                    )}
+
                     {ord.status_pesanan === 'Dibayar' && (
                       <button
                         type="button"
-                        className="btn btn-primary btn-sm"
+                        className="btn btn-primary"
+                        style={{ background: '#10b981', fontWeight: '700' }}
                         onClick={() => handleProcessOrder(ord.id)}
                       >
-                        ⚡ Mulai Proses Pesanan
+                        ⚡ Mulai Proses Pesanan (Siapkan Pangan)
                       </button>
                     )}
 
                     {ord.status_pesanan === 'Diproses' && (
                       <button
                         type="button"
-                        className="btn btn-warning btn-sm"
+                        className="btn btn-warning"
                         onClick={() => {
                           setShippingOrder(ord);
                           setNomorResi('RESI-' + Math.floor(100000 + Math.random() * 900000));
                         }}
                       >
-                        🚚 Kirim Pesanan
+                        🚚 Kirim Pesanan (Input Resi & Kurir)
                       </button>
                     )}
 
                     {ord.status_pesanan === 'Dikirim' && (
-                      <span style={{ fontSize: '12px', color: '#0284c7', fontWeight: '600' }}>
-                        Sedang dalam perjalanan ke pembeli
+                      <span style={{ fontSize: '12.5px', color: '#0284c7', fontWeight: '700', background: '#e0f2fe', padding: '6px 12px', borderRadius: '6px' }}>
+                        🚚 Dalam Perjalanan ke Pembeli
                       </span>
                     )}
 
                     {ord.status_pesanan === 'Selesai' && (
-                      <span style={{ fontSize: '12px', color: '#16a34a', fontWeight: '700' }}>
-                        ✅ Dana Rp {Number(ord.total_bayar).toLocaleString('id-ID')} Sudah Masuk ke Rekening Anda
+                      <span style={{ fontSize: '12px', color: '#16a34a', fontWeight: '700', background: '#dcfce7', padding: '6px 12px', borderRadius: '6px' }}>
+                        ✅ Selesai • Dana Rp {Number(ord.total_bayar).toLocaleString('id-ID')} Telah Masuk ke Rekening
                       </span>
                     )}
                   </div>
@@ -451,7 +618,7 @@ export default function SellerDashboardPage({ user }) {
                 completedOrders.map((ord) => (
                   <tr key={ord.id}>
                     <td><strong>{ord.nomor_pesanan}</strong></td>
-                    <td>{user?.nama_bank} - {user?.nomor_rekening}</td>
+                    <td>{user?.nama_bank || 'BCA'} - {user?.nomor_rekening || '-'}</td>
                     <td style={{ fontWeight: '800', color: '#10b981' }}>
                       Rp {Number(ord.total_bayar).toLocaleString('id-ID')}
                     </td>
@@ -470,17 +637,39 @@ export default function SellerDashboardPage({ user }) {
       {/* Modal Form Produk (Tambah/Ubah UC-10) */}
       {isProductModalOpen && (
         <div className="modal-overlay" onClick={() => setIsProductModalOpen(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" style={{ maxWidth: '640px' }} onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3 className="modal-title">
-                {editingProduct ? '✏️ Ubah Data Produk Pangan' : '➕ Tambah Produk Pangan Baru'}
+                {editingProduct ? '✏️ Ubah Data Produk Pangan' : '➕ Tambah / Listing Produk Pangan Baru'}
               </h3>
               <button className="modal-close" onClick={() => setIsProductModalOpen(false)}>&times;</button>
             </div>
 
+            {/* Template Cepat untuk Pengisian Cepat */}
+            {!editingProduct && (
+              <div style={{ background: '#f8fafc', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+                <span style={{ fontSize: '12px', fontWeight: '700', color: '#334155', display: 'block', marginBottom: '8px' }}>
+                  ⚡ Isi Otomatis dengan Template Pangan Cepat:
+                </span>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {quickTemplates.map((tpl, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      className="chip-btn"
+                      style={{ fontSize: '11.5px', padding: '4px 8px' }}
+                      onClick={() => applyTemplate(tpl)}
+                    >
+                      {tpl.nama_produk.split(' ')[0]} {tpl.nama_produk.split(' ')[1]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {productError && (
-              <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px', borderRadius: '6px', fontSize: '13px', marginBottom: '12px' }}>
-                ⚠️ {productError}
+              <div style={{ background: '#fee2e2', color: '#991b1b', padding: '10px 14px', borderRadius: '8px', fontSize: '13px', marginBottom: '14px', border: '1px solid #f87171' }}>
+                ⚠️ <strong>Perhatian:</strong> {productError}
               </div>
             )}
 
@@ -499,7 +688,7 @@ export default function SellerDashboardPage({ user }) {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div className="form-group">
-                  <label className="form-label">Kategori</label>
+                  <label className="form-label">Kategori Pangan</label>
                   <select
                     className="form-control"
                     value={formData.kategori}
@@ -520,6 +709,7 @@ export default function SellerDashboardPage({ user }) {
                     required
                     min="1"
                     className="form-control"
+                    placeholder="Contoh: 15000"
                     value={formData.harga}
                     onChange={(e) => setFormData({ ...formData, harga: e.target.value })}
                   />
@@ -528,12 +718,13 @@ export default function SellerDashboardPage({ user }) {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                 <div className="form-group">
-                  <label className="form-label">Jumlah Stok</label>
+                  <label className="form-label">Jumlah Stok Tersedia</label>
                   <input
                     type="number"
                     required
                     min="0"
                     className="form-control"
+                    placeholder="Contoh: 100"
                     value={formData.stok}
                     onChange={(e) => setFormData({ ...formData, stok: e.target.value })}
                   />
@@ -546,7 +737,8 @@ export default function SellerDashboardPage({ user }) {
                     required
                     min="1"
                     className="form-control"
-                    title="Aturan minimum pembelian eceran atau grosir"
+                    title="Batas beli eceran (1) atau grosir (5/10)"
+                    placeholder="1 untuk eceran, 5+ grosir"
                     value={formData.minimum_pembelian}
                     onChange={(e) => setFormData({ ...formData, minimum_pembelian: e.target.value })}
                   />
@@ -554,7 +746,7 @@ export default function SellerDashboardPage({ user }) {
               </div>
 
               <div className="form-group">
-                <label className="form-label">URL Foto Produk</label>
+                <label className="form-label">URL Foto Produk (Opsional / Otomatis)</label>
                 <input
                   type="text"
                   className="form-control"
@@ -565,21 +757,22 @@ export default function SellerDashboardPage({ user }) {
               </div>
 
               <div className="form-group">
-                <label className="form-label">Deskripsi Produk</label>
+                <label className="form-label">Deskripsi & Mutu Produk</label>
                 <textarea
                   className="form-control"
                   rows="3"
+                  placeholder="Jelaskan kualitas, kesegaran, varietas, atau cara penyimpanan..."
                   value={formData.deskripsi}
                   onChange={(e) => setFormData({ ...formData, deskripsi: e.target.value })}
                 ></textarea>
               </div>
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setIsProductModalOpen(false)}>
                   Batal
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Simpan Produk
+                <button type="submit" className="btn btn-primary" disabled={savingProduct}>
+                  {savingProduct ? 'Menyimpan...' : 'Simpan & Tayangkan Produk'}
                 </button>
               </div>
             </form>
@@ -598,7 +791,7 @@ export default function SellerDashboardPage({ user }) {
 
             <form onSubmit={handleShipOrder}>
               <div className="form-group">
-                <label className="form-label">Pilih Kurir / Ekspedisi</label>
+                <label className="form-label">Pilih Kurir / Armada</label>
                 <select className="form-control" value={kurir} onChange={(e) => setKurir(e.target.value)}>
                   <option value="Kurir Tani Mandiri">Kurir Tani Mandiri (Armada Toko)</option>
                   <option value="J&T Express">J&T Express</option>
@@ -634,8 +827,8 @@ export default function SellerDashboardPage({ user }) {
                 <button type="button" className="btn btn-secondary" onClick={() => setShippingOrder(null)}>
                   Batal
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  Konfirmasi Pengiriman
+                <button type="submit" className="btn btn-primary" disabled={shippingLoading}>
+                  {shippingLoading ? 'Mengirim...' : 'Konfirmasi Pengiriman'}
                 </button>
               </div>
             </form>

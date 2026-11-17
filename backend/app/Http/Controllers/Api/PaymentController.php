@@ -23,7 +23,8 @@ class PaymentController extends Controller
             return response()->json(['message' => 'Pesanan tidak ditemukan.'], 404);
         }
 
-        if ($order->pembeli_id !== $user->id) {
+        // Boleh dibayar oleh pembeli pemilik, atau penjual penerima, atau admin (untuk simulasi gateway)
+        if ($order->pembeli_id !== $user->id && $order->penjual_id !== $user->id && $user->role !== 'admin') {
             return response()->json(['message' => 'Akses ditolak.'], 403);
         }
 
